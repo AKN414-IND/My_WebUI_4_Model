@@ -1,0 +1,5 @@
+streamlit==1.13.0
+PyPDF2==2.2.0
+langchain==0.2.0
+ollama==0.1.5
+chroma==0.1.1
