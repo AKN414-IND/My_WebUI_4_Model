@@ -1,7 +1,8 @@
 import streamlit as st
 from PyPDF2 import PdfReader
 from io import BytesIO
-from langchain import hub
+from PIL import Image
+import docx
 from langchain.chains import RetrievalQA
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain.callbacks.manager import CallbackManager
@@ -18,33 +19,45 @@ class Document:
         self.page_content = text
         self.metadata = metadata if metadata else {}
 
-# Initialize the model
 LOCAL_MODEL = "llama3.1"
 EMBEDDING = "nomic-embed-text"
 llm = Ollama(base_url="http://localhost:11434", model=LOCAL_MODEL, verbose=True,
              callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]))
 
-# Streamlit UI
-st.title("PDF Content-Based Query Answering System")
+st.set_page_config(page_title="Chat-Based Query Answering", layout="wide")
+st.title("Chat-Based Query Answering System")
 
-uploaded_file = st.file_uploader("Choose a PDF file", type=["pdf"])
+with st.sidebar:
+    st.header("Upload a File")
+    uploaded_file = st.file_uploader("Choose a file", type=["pdf", "png", "jpg", "jpeg", "docx", "txt"])
+
 if uploaded_file is not None:
-    # Convert uploaded file to a byte stream
-    pdf_file = BytesIO(uploaded_file.getvalue())
-
-    # Read PDF content using PyPDF2
-    reader = PdfReader(pdf_file)
-    number_of_pages = len(reader.pages)
     all_text = ""
-    for page in range(number_of_pages):
-        page_text = reader.pages[page].extract_text()
-        if page_text:
-            all_text += page_text + "\n"
-    
-    # Display the extracted text
-    st.text_area("Extracted Text", all_text, height=300)
 
-    # Text processing setup
+    if uploaded_file.type == "application/pdf":
+        pdf_file = BytesIO(uploaded_file.getvalue())
+        reader = PdfReader(pdf_file)
+        for page in range(len(reader.pages)):
+            page_text = reader.pages[page].extract_text()
+            if page_text:
+                all_text += page_text + "\n"
+    
+    elif uploaded_file.type in ["image/png", "image/jpeg"]:
+        image = Image.open(uploaded_file)
+        st.image(image, caption="Uploaded Image", use_column_width=True)
+        # OCR text extraction logic would be added here
+    
+    elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        doc = docx.Document(uploaded_file)
+        for paragraph in doc.paragraphs:
+            all_text += paragraph.text + "\n"
+
+    elif uploaded_file.type == "text/plain":
+        all_text = uploaded_file.read().decode("utf-8")
+    
+    with st.expander("Extracted Text", expanded=False):
+        st.text_area("Text Content", all_text, height=200)
+
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=100)
     doc = Document(all_text)
     all_splits = text_splitter.split_documents([doc])
@@ -91,10 +104,50 @@ if uploaded_file is not None:
         }
     )
 
+    st.write("---")
+    st.subheader("Chat with the Document")
 
-    # Query handling
-    
-    query = st.text_input("Enter your question:")
-    if query:
-        response = qa_chain.invoke({"query": query})
-        st.write(response)
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    with st.container():
+        for i, msg in enumerate(st.session_state.messages):
+            st.write(f"**{'User' if i % 2 == 0 else 'Chatbot'}:** {msg}")
+
+    query = st.text_input("Enter your question:", value="", key="input_query", placeholder="Type your question here...")
+    if st.button("Submit"):
+        if query:
+            st.session_state.messages.append(query)
+            response = qa_chain.invoke({"query": query})
+            st.session_state.messages.append(response['result'])
+            st.experimental_rerun()
+
+
+st.markdown(
+    """
+    <style>
+    .stTextInput > div > div > input {
+        font-size: 18px;
+        padding: 10px;
+        border-radius: 10px;
+        border: 1px solid #ddd;
+    }
+    .stTextInput > div > div > input:focus {
+        border: 1px solid #aaa;
+    }
+    .stContainer > div {
+        margin-bottom: 20px;
+        padding: 10px;
+        border-radius: 10px;
+        background-color: #f9f9f9;
+    }
+    .stContainer > div:nth-child(odd) {
+        background-color: #e0e0e0;
+    }
+    .stTextArea {
+        border-radius: 10px;
+        border: 1px solid #ddd;
+    }
+    </style>
+    """, unsafe_allow_html=True
+)
