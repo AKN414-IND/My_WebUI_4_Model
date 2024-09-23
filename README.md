@@ -11,7 +11,7 @@ Welcome to the AI Developer Assistant! This tool is designed to help you build p
   - Uses the Ollama model for generating code and project structure suggestions.
 
 - **Document Chat Mode:**
-  - Allows you to upload and chat with documents (PDF, TXT).
+  - Allows you to upload and chat with documents (PDF, TXT, or MD).
   - Utilizes advanced vector storage (FAISS) and retrieval to answer questions based on the content of uploaded documents.
 
 - **General Chat Mode:**
@@ -65,7 +65,7 @@ Welcome to the AI Developer Assistant! This tool is designed to help you build p
    - Utilize Git integration for version control.
 
 2. **Document Chat:**
-   - Upload a document (PDF or TXT) and interact with it by asking questions.
+   - Upload a document (PDF, TXT, or MD) and interact with it by asking questions.
    - The AI will retrieve relevant information from the document and provide answers.
 
 3. **General Chat:**
@@ -85,7 +85,7 @@ Contributions are welcome! Please fork this repository and submit a pull request
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](/mit.md) file for more details.
+This project is licensed under the MIT License. See the [LICENSE](/LICENSE) file for more details.
 
 ## Creator
 

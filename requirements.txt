@@ -15,10 +15,3 @@ beautifulsoup4>=4.9.0
 PyPDF2>=2.0.0
 python-docx>=0.8.10
 openpyxl>=3.0.0
-zipfile36; python_version < '3.6'
-io
-typing
-tempfile
-errno
-re
-csv
