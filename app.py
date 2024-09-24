@@ -16,11 +16,6 @@ from langchain.vectorstores import FAISS
 from langchain.embeddings import HuggingFaceEmbeddings
 import tempfile
 
-import errno
-from pygments import highlight
-from pygments.lexers import get_lexer_for_filename, TextLexer
-from pygments.formatters.html import HtmlFormatter
-from langchain.chains import RetrievalQA
 import re
 import requests
 from bs4 import BeautifulSoup
@@ -92,7 +87,7 @@ def init_session_state():
         'project_dir': None,
         'vectorstore': None,
         'messages': [],
-        'mode': "Project Building",
+        'mode': "README Generator",
         'git_initialized': False,
         'current_file': None,
         'web_scraping_results': None,
@@ -125,7 +120,7 @@ def load_project_state():
 
 def sidebar_content():
     st.sidebar.title("AI Developer Assistant")
-    st.session_state.mode = st.sidebar.radio("Choose a mode", ["Project Building", "Document Chat", "General Chat", "Web Scraping"])
+    st.session_state.mode = st.sidebar.radio("Choose a mode", ["README Generator", "Document Chat", "General Chat", "Web Scraping"])
     available_models = get_available_models()
     selected_model = st.sidebar.selectbox("Choose a model", available_models) if available_models else None
     if "project_state" in st.session_state:
@@ -153,128 +148,74 @@ def export_project():
             mime="application/zip"
         )
 
-def project_building_mode(selected_model: str):
-    if not st.session_state.project_started:
-        st.write("Please provide a brief description of your project and the desired project directory name.")
-        project_description = st.text_area("Project Description:", height=150)
-        project_name = st.text_input("Project Directory Name:")
-        if st.button("Start Project") and project_description and project_name:
-            sanitized_project_name = sanitize_filename(project_name)
-            st.session_state.project_dir = os.path.join(os.getcwd(), sanitized_project_name)
-            os.makedirs(st.session_state.project_dir, exist_ok=True)
-            st.session_state.project_started = True
-            st.session_state.project_info['description'] = project_description
-            st.session_state.project_state = f"Project initialized. Directory: {st.session_state.project_dir}"
-            
-            git_init_message = init_git_repo(st.session_state.project_dir)
-            st.session_state.git_initialized = "successfully" in git_init_message.lower()
-            st.session_state.project_state += f"\n{git_init_message}"
-            
-            save_project_state()
-            st.experimental_rerun()
-    elif selected_model and st.session_state.project_started:
-        load_project_state()
-        llm = Ollama(base_url=OLLAMA_BASE_URL, model=selected_model, callbacks=[StreamingStdOutCallbackHandler()])
-        template = """You are an AI developer assistant tasked with building a base application for a team to work on. Your goal is to create a starting point with dummy data and basic functionality based on the project description provided. Always provide relative file paths when creating or updating files.
-
-        Project Description:
-        {project_info}
-
-        Current project state:
-        {project_state}
-
-        Chat history:
-        {chat_history}
-
-        Human: {human_input}
-        AI Developer:"""
-        conversation = LLMChain(
-            llm=llm,
-            prompt=PromptTemplate(input_variables=["project_info", "project_state", "chat_history", "human_input"], template=template),
-            verbose=True,
-            memory=ConversationBufferMemory(input_key="human_input", memory_key="chat_history"),
-        )
-
-        st.write("### Chat History")
-        for message in st.session_state.messages:
-            st.write(f"**{message['role']}:** {message['content']}")
-
-        user_input = st.text_input("What would you like the AI developer to do?", key="user_input")
-        if st.button("Send") and user_input:
-            st.session_state.messages.append({"role": "Human", "content": user_input})
-            with st.spinner("AI developer is working..."):
-                response = conversation.predict(human_input=user_input, project_info=json.dumps(st.session_state.project_info), project_state=st.session_state.project_state)
-            st.session_state.messages.append({"role": "AI Developer", "content": response})
-            if "```" in response:
-                for i in range(1, len(response.split("```")), 2):
-                    file_content = response.split("```")[i].strip()
-                    file_path = file_content.split("\n")[0].strip()
-                    code = "\n".join(file_content.split("\n")[1:])
-                    update_message = create_or_update_file(st.session_state.project_dir, code, file_path)
-                    st.session_state.project_state += f"\n{update_message}"
-                    if "Error" in update_message:
-                        st.error(update_message)
-                    else:
-                        st.success(update_message)
-            save_project_state()
-            st.experimental_rerun()
-
-        if st.session_state.git_initialized:
-            st.write("### Git Operations")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                commit_message = st.text_input("Commit message:")
-                if st.button("Commit Changes") and commit_message:
-                    commit_result = git_add_commit(st.session_state.project_dir, commit_message)
-                    st.write(commit_result)
-            
-            with col2:
-                new_branch_name = st.text_input("New branch name:")
-                if st.button("Create Branch") and new_branch_name:
-                    branch_result = git_create_branch(st.session_state.project_dir, new_branch_name)
-                    st.write(branch_result)
-            
-            branches = git_list_branches(st.session_state.project_dir)
-            if isinstance(branches, list):
-                selected_branch = st.selectbox("Select branch:", branches)
-                if st.button("Switch Branch"):
-                    switch_result = git_switch_branch(st.session_state.project_dir, selected_branch)
-                    st.write(switch_result)
-            
-            current_branch = git_get_current_branch(st.session_state.project_dir)
-            st.write(f"Current branch: {current_branch}")
-            
-            st.write("### Commit History")
-            commit_history = git_get_commit_history(st.session_state.project_dir)
-            if isinstance(commit_history, list):
-                for commit in commit_history:
-                    st.write(f"{commit['hash']} - {commit['message']} (by {commit['author']} on {commit['date']})")
-        
-        st.write("### Project Files")
-        col1, col2 = st.columns([1, 3])
-        
-        with col1:
-            st.write("File Explorer")
-            project_tree_view()
-        
-        with col2:
-            if st.session_state.current_file:
-                st.write(f"Editing: {st.session_state.current_file}")
-                file_path = os.path.join(st.session_state.project_dir, st.session_state.current_file)
-                with open(file_path, "r") as f:
-                    file_content = f.read()
-                edited_content = st.text_area("Edit file content:", value=file_content, height=300)
-                if st.button("Save Changes"):
-                    update_message = create_or_update_file(st.session_state.project_dir, edited_content, st.session_state.current_file)
-                    if "Error" in update_message:
-                        st.error(update_message)
-                    else:
-                        st.success(update_message)
-                    save_project_state()
+def readme_generator_mode(selected_model: str):
+    load_project_state()
+    project_dir = st.text_input("Enter the local path of the project directory:")
+    if st.button("Generate README") and project_dir:
+        with st.spinner("Generating README..."):
+            readme_content = generate_readme(project_dir, selected_model)
+            st.session_state.current_file = "README.md"
+            st.session_state.project_dir = project_dir
+            update_message = create_or_update_file(project_dir, readme_content, "README.md")
+            if "Error" in update_message:
+                st.error(update_message)
             else:
-                st.write("Select a file from the File Explorer to edit")
+                st.success(update_message)
+            save_project_state()
+            st.experimental_rerun()
+    
+    if st.session_state.current_file:
+        st.write(f"Editing: {st.session_state.current_file}")
+        file_path = os.path.join(st.session_state.project_dir, st.session_state.current_file)
+        with open(file_path, "r") as f:
+            file_content = f.read()
+        edited_content = st.text_area("Edit file content:", value=file_content, height=300)
+        if st.button("Save Changes"):
+            update_message = create_or_update_file(st.session_state.project_dir, edited_content, st.session_state.current_file)
+            if "Error" in update_message:
+                st.error(update_message)
+            else:
+                st.success(update_message)
+            save_project_state()
+    
+    if st.button("Delete Project State"):
+        if st.session_state.project_dir:
+            state_file = os.path.join(st.session_state.project_dir, "project_state.json")
+            if os.path.exists(state_file):
+                os.remove(state_file)
+                st.success("Project state deleted successfully.")
+            else:
+                st.error("No project state file found to delete.")
+        else:
+            st.error("No project directory set.")
+
+def generate_readme(project_dir: str, selected_model: str) -> str:
+    readme_path = os.path.join(project_dir, "README.md")
+    if os.path.exists(readme_path):
+        with open(readme_path, "r") as f:
+            existing_readme = f.read()
+    else:
+        existing_readme = ""
+
+    llm = Ollama(base_url=OLLAMA_BASE_URL, model=selected_model, callbacks=[StreamingStdOutCallbackHandler()])
+    template = """You are an AI developer assistant tasked with generating a README file for a project. The README should include an overview, installation instructions, usage examples, and any other relevant information.
+
+    Project Directory:
+    {project_dir}
+
+    Existing README Content:
+    {existing_readme}
+
+    AI Developer:"""
+    conversation = LLMChain(
+        llm=llm,
+        prompt=PromptTemplate(input_variables=["project_dir", "existing_readme"], template=template),
+        verbose=True,
+        memory=ConversationBufferMemory(input_key="project_dir", memory_key="chat_history"),
+    )
+
+    response = conversation.predict(project_dir=project_dir, existing_readme=existing_readme)
+    return response
 
 def document_chat_mode(selected_model: str):
     uploaded_file = st.file_uploader("Upload a document (PDF, TXT, or MD)", type=["pdf", "txt", "md"])
@@ -423,8 +364,8 @@ def main():
     init_session_state()
     selected_model = sidebar_content()
     
-    if st.session_state.mode == "Project Building":
-        project_building_mode(selected_model)
+    if st.session_state.mode == "README Generator":
+        readme_generator_mode(selected_model)
     elif st.session_state.mode == "Document Chat":
         document_chat_mode(selected_model)
     elif st.session_state.mode == "General Chat":
@@ -432,81 +373,15 @@ def main():
     elif st.session_state.mode == "Web Scraping":
         web_scraping_mode()
 
-def project_tree_view():
+def delete_history():
     if st.session_state.project_dir:
-        for root, dirs, files in os.walk(st.session_state.project_dir):
-            level = root.replace(st.session_state.project_dir, '').count(os.sep)
-            indent = '&nbsp;&nbsp;&nbsp;&nbsp;' * level
-            folder_name = os.path.basename(root)
-            st.markdown(f"{indent}📁 {folder_name}", unsafe_allow_html=True)
-            subindent = '&nbsp;&nbsp;&nbsp;&nbsp;' * (level + 1)
-            for file in files:
-                file_path = os.path.relpath(os.path.join(root, file), st.session_state.project_dir)
-                if st.button(f"{subindent}📄 {file}", key=file_path):
-                    st.session_state.current_file = file_path
-
-def init_git_repo(project_dir: str) -> str:
-    try:
-        subprocess.run(["git", "init"], cwd=project_dir, check=True, capture_output=True, text=True)
-        return "Git repository initialized successfully."
-    except subprocess.CalledProcessError as e:
-        return f"Error initializing Git repository: {e.stderr}"
-
-def git_add_commit(project_dir: str, commit_message: str) -> str:
-    try:
-        subprocess.run(["git", "add", "."], cwd=project_dir, check=True, capture_output=True, text=True)
-        subprocess.run(["git", "commit", "-m", commit_message], cwd=project_dir, check=True, capture_output=True, text=True)
-        return "Changes committed successfully."
-    except subprocess.CalledProcessError as e:
-        return f"Error committing changes: {e.stderr}"
-
-def git_create_branch(project_dir: str, branch_name: str) -> str:
-    try:
-        subprocess.run(["git", "checkout", "-b", branch_name], cwd=project_dir, check=True, capture_output=True, text=True)
-        return f"Branch '{branch_name}' created and switched to successfully."
-    except subprocess.CalledProcessError as e:
-        return f"Error creating branch: {e.stderr}"
-
-def git_switch_branch(project_dir: str, branch_name: str) -> str:
-    try:
-        subprocess.run(["git", "checkout", branch_name], cwd=project_dir, check=True, capture_output=True, text=True)
-        return f"Switched to branch '{branch_name}' successfully."
-    except subprocess.CalledProcessError as e:
-        return f"Error switching branch: {e.stderr}"
-
-def git_list_branches(project_dir: str) -> List[str]:
-    try:
-        result = subprocess.run(["git", "branch"], cwd=project_dir, check=True, capture_output=True, text=True)
-        return [branch.strip() for branch in result.stdout.split('\n') if branch.strip()]
-    except subprocess.CalledProcessError as e:
-        st.error(f"Error listing branches: {e.stderr}")
-        return []
-
-def git_get_current_branch(project_dir: str) -> str:
-    try:
-        result = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=project_dir, check=True, capture_output=True, text=True)
-        return result.stdout.strip()
-    except subprocess.CalledProcessError as e:
-        st.error(f"Error getting current branch: {e.stderr}")
-        return "Unknown"
-
-def git_get_commit_history(project_dir: str) -> List[Dict[str, str]]:
-    try:
-        result = subprocess.run(["git", "log", "--pretty=format:%H|%an|%ad|%s"], cwd=project_dir, check=True, capture_output=True, text=True)
-        commits = []
-        for line in result.stdout.split('\n'):
-            if line:
-                hash, author, date, message = line.split('|', 3)
-                commits.append({
-                    "hash": hash[:7],
-                    "author": author,
-                    "date": date,
-                    "message": message
-                })
-        return commits
-    except subprocess.CalledProcessError as e:
-        st.error(f"Error getting commit history: {e.stderr}")
-        return []
+        state_file = os.path.join(st.session_state.project_dir, "project_state.json")
+        if os.path.exists(state_file):
+            os.remove(state_file)
+            st.success("Project state deleted successfully.")
+        else:
+            st.error("No project state file found to delete.")
 
 if __name__ == "__main__":
     main()
+    delete_history()
