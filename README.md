@@ -4,12 +4,9 @@ Welcome to the AI Developer Assistant! This tool is designed to help you build p
 
 ## Features
 
-- **Project Building Mode:**
-  - Guides you through the process of setting up and managing a project.
-  - Assists in creating, updating, and viewing project files.
-  - Integrates with Git for version control, including initializing repositories, committing changes, and managing branches.
-  - Uses the Ollama model for generating code and project structure suggestions.
-
+- **README Generator:**
+  - Allow you to just paste your local path and get a basic readme about the project which can be used as a aphla model readme to build on.
+  
 - **Document Chat Mode:**
   - Allows you to upload and chat with documents (PDF, TXT, or MD).
   - Utilizes advanced vector storage (FAISS) and retrieval to answer questions based on the content of uploaded documents.

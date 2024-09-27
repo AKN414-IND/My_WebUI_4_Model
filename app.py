@@ -15,6 +15,7 @@ from langchain.text_splitter import CharacterTextSplitter
 from langchain.vectorstores import FAISS
 from langchain.embeddings import HuggingFaceEmbeddings
 import tempfile
+from langchain.chains import RetrievalQA
 
 import re
 import requests
@@ -123,8 +124,6 @@ def sidebar_content():
     st.session_state.mode = st.sidebar.radio("Choose a mode", ["README Generator", "Document Chat", "General Chat", "Web Scraping"])
     available_models = get_available_models()
     selected_model = st.sidebar.selectbox("Choose a model", available_models) if available_models else None
-    if "project_state" in st.session_state:
-        st.sidebar.text_area("Current State", st.session_state.project_state, height=100)
     if st.session_state.project_dir:
         if st.sidebar.button("Export Project"):
             export_project()
@@ -251,28 +250,29 @@ def general_chat_mode(selected_model: str):
 def web_scraping_mode():
     st.write("### Web Scraping")
     url = st.text_input("Enter a URL to scrape:")
-    
+
     st.write("Select the data you want to scrape:")
+    columns = st.columns(10)
     data_to_scrape = {
-        "title": st.checkbox("Title", value=True),
-        "meta": st.checkbox("Meta Information", value=True),
-        "headers": st.checkbox("Headers", value=True),
-        "paragraphs": st.checkbox("Paragraphs", value=True),
-        "links": st.checkbox("Links", value=True),
-        "images": st.checkbox("Images", value=True),
-        "tables": st.checkbox("Tables", value=True),
-        "lists": st.checkbox("Lists", value=True),
-        "scripts": st.checkbox("Scripts", value=True),
-        "styles": st.checkbox("Styles", value=True)
+        "title": columns[0].checkbox("Title", value=True),
+        "meta": columns[1].checkbox("Meta Information", value=True),
+        "headers": columns[2].checkbox("Headers", value=True),
+        "paragraphs": columns[3].checkbox("Paragraphs", value=True),
+        "links": columns[4].checkbox("Links", value=True),
+        "images": columns[5].checkbox("Images", value=True),
+        "tables": columns[6].checkbox("Tables", value=True),
+        "lists": columns[7].checkbox("Lists", value=True),
+        "scripts": columns[8].checkbox("Scripts", value=True),
+        "styles": columns[9].checkbox("Styles", value=True)
     }
-    
+
     if st.button("Scrape") and url:
         with st.spinner("Scraping website..."):
             try:
                 response = requests.get(url)
                 soup = BeautifulSoup(response.content, 'html.parser')
                 st.session_state.web_scraping_results = {}
-                
+
                 if data_to_scrape["title"]:
                     st.session_state.web_scraping_results["title"] = soup.title.string if soup.title else "No title found"
                 if data_to_scrape["meta"]:
@@ -296,14 +296,14 @@ def web_scraping_mode():
                     st.session_state.web_scraping_results["scripts"] = [script.string for script in soup.find_all('script') if script.string]
                 if data_to_scrape["styles"]:
                     st.session_state.web_scraping_results["styles"] = [style.string for style in soup.find_all('style') if style.string]
-                
+
                 st.success("Scraping completed successfully!")
             except Exception as e:
                 st.error(f"Error scraping website: {str(e)}")
-    
+
     if st.session_state.web_scraping_results:
         st.write("#### Scraping Results")
-        
+
         for key, value in st.session_state.web_scraping_results.items():
             st.subheader(key.capitalize())
             if isinstance(value, str):
@@ -317,11 +317,11 @@ def web_scraping_mode():
                         st.write(f"Table {i+1}")
                         st.dataframe(pd.DataFrame(table))
                 else:
-                    for item in value[:5]:  
+                    for item in value[:5]:
                         st.write(f"- {item}")
                     if len(value) > 5:
                         st.write(f"... and {len(value) - 5} more items")
-        
+
         st.subheader("Export Options")
         export_format = st.selectbox("Choose export format", ["JSON", "CSV", "HTML"])
         if st.button("Export Data"):
