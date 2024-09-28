@@ -36,6 +36,9 @@ def get_available_models() -> List[str]:
     try:
         result = subprocess.run(["ollama", "list"], capture_output=True, text=True)
         return [line.split()[0] for line in result.stdout.split('\n')[1:] if line]
+    except FileNotFoundError:
+        st.error("The 'ollama' tool is not installed or not found in the environment.")
+        return []
     except Exception as e:
         st.error(f"Error listing models: {str(e)}")
         return []
