@@ -123,7 +123,7 @@ def load_project_state():
                 st.session_state.git_initialized = state.get("git_initialized", False)
 
 def sidebar_content():
-    st.sidebar.title("AI Developer Assistant")
+    st.sidebar.title("Dev'sUI")
     st.session_state.mode = st.sidebar.radio("Choose a mode", ["README Generator", "Document Chat", "General Chat", "Web Scraping"])
     available_models = get_available_models()
     selected_model = st.sidebar.selectbox("Choose a model", available_models) if available_models else None
@@ -363,7 +363,7 @@ def web_scraping_mode():
                 st.download_button(label="Download HTML", data=html_str, file_name="scraping_results.html", mime="text/html")
 
 def main():
-    st.set_page_config(page_title="AI Developer Assistant", layout="wide")
+    st.set_page_config(page_title="Dev'sUI", layout="wide")
     init_session_state()
     selected_model = sidebar_content()
     
