@@ -126,11 +126,14 @@ def sidebar_content():
     st.sidebar.title("Dev'sUI")
     st.session_state.mode = st.sidebar.radio("Choose a mode", ["README Generator", "Document Chat", "General Chat", "Web Scraping"])
     available_models = get_available_models()
-    selected_model = st.sidebar.selectbox("Choose a model", available_models) if available_models else None
+    if available_models:
+        st.session_state.selected_model = st.sidebar.selectbox("Choose a model", available_models)
+    else:
+        st.session_state.selected_model = None
     if st.session_state.project_dir:
         if st.sidebar.button("Export Project"):
             export_project()
-    return selected_model
+    return st.session_state.selected_model
 
 def export_project():
     if st.session_state.project_dir:
@@ -250,7 +253,7 @@ def general_chat_mode(selected_model: str):
         st.session_state.general_chat_messages.append({"role": "AI", "content": response})
         st.experimental_rerun()
 
-def web_scraping_mode():
+def web_scraping_mode(selected_model: str):
     st.write("### Web Scraping")
     url = st.text_input("Enter a URL to scrape:")
 
@@ -274,40 +277,41 @@ def web_scraping_mode():
             try:
                 response = requests.get(url)
                 soup = BeautifulSoup(response.content, 'html.parser')
-                st.session_state.web_scraping_results = {}
+                scraped_data = {}
 
                 if data_to_scrape["title"]:
-                    st.session_state.web_scraping_results["title"] = soup.title.string if soup.title else "No title found"
+                    scraped_data["title"] = soup.title.string if soup.title else "No title found"
                 if data_to_scrape["meta"]:
-                    st.session_state.web_scraping_results["meta"] = {meta['name']: meta['content'] for meta in soup.find_all('meta', attrs={'name': True, 'content': True})}
+                    scraped_data["meta"] = {meta['name']: meta['content'] for meta in soup.find_all('meta', attrs={'name': True, 'content': True})}
                 if data_to_scrape["headers"]:
-                    st.session_state.web_scraping_results["headers"] = {f"h{i}": [h.text for h in soup.find_all(f'h{i}')] for i in range(1, 7)}
+                    scraped_data["headers"] = {f"h{i}": [h.text for h in soup.find_all(f'h{i}')] for i in range(1, 7)}
                 if data_to_scrape["paragraphs"]:
-                    st.session_state.web_scraping_results["paragraphs"] = [p.text for p in soup.find_all('p')]
+                    scraped_data["paragraphs"] = [p.text for p in soup.find_all('p')]
                 if data_to_scrape["links"]:
-                    st.session_state.web_scraping_results["links"] = [{'text': a.text, 'href': a['href']} for a in soup.find_all('a', href=True)]
+                    scraped_data["links"] = [{'text': a.text, 'href': a['href']} for a in soup.find_all('a', href=True)]
                 if data_to_scrape["images"]:
-                    st.session_state.web_scraping_results["images"] = [{'src': img['src'], 'alt': img.get('alt', '')} for img in soup.find_all('img', src=True)]
+                    scraped_data["images"] = [{'src': img['src'], 'alt': img.get('alt', '')} for img in soup.find_all('img', src=True)]
                 if data_to_scrape["tables"]:
-                    st.session_state.web_scraping_results["tables"] = [pd.read_html(str(table))[0].to_dict() for table in soup.find_all('table')]
+                    scraped_data["tables"] = [pd.read_html(str(table))[0].to_dict() for table in soup.find_all('table')]
                 if data_to_scrape["lists"]:
-                    st.session_state.web_scraping_results["lists"] = {
+                    scraped_data["lists"] = {
                         'ul': [{'items': [li.text for li in ul.find_all('li')]} for ul in soup.find_all('ul')],
                         'ol': [{'items': [li.text for li in ol.find_all('li')]} for ol in soup.find_all('ol')]
                     }
                 if data_to_scrape["scripts"]:
-                    st.session_state.web_scraping_results["scripts"] = [script.string for script in soup.find_all('script') if script.string]
+                    scraped_data["scripts"] = [script.string for script in soup.find_all('script') if script.string]
                 if data_to_scrape["styles"]:
-                    st.session_state.web_scraping_results["styles"] = [style.string for style in soup.find_all('style') if style.string]
+                    scraped_data["styles"] = [style.string for style in soup.find_all('style') if style.string]
 
+                st.session_state.scraped_data = scraped_data
                 st.success("Scraping completed successfully!")
             except Exception as e:
                 st.error(f"Error scraping website: {str(e)}")
 
-    if st.session_state.web_scraping_results:
+    if "scraped_data" in st.session_state:
         st.write("#### Scraping Results")
 
-        for key, value in st.session_state.web_scraping_results.items():
+        for key, value in st.session_state.scraped_data.items():
             st.subheader(key.capitalize())
             if isinstance(value, str):
                 st.write(value)
@@ -325,42 +329,31 @@ def web_scraping_mode():
                     if len(value) > 5:
                         st.write(f"... and {len(value) - 5} more items")
 
-        st.subheader("Export Options")
-        export_format = st.selectbox("Choose export format", ["JSON", "CSV", "HTML"])
-        if st.button("Export Data"):
-            if export_format == "JSON":
-                json_str = json.dumps(st.session_state.web_scraping_results, indent=2)
-                st.download_button(label="Download JSON", data=json_str, file_name="scraping_results.json", mime="application/json")
-            elif export_format == "CSV":
-                csv_data = io.StringIO()
-                writer = csv.writer(csv_data)
-                for key, value in st.session_state.web_scraping_results.items():
-                    if isinstance(value, list):
-                        writer.writerow([key] + value)
-                    elif isinstance(value, dict):
-                        for sub_key, sub_value in value.items():
-                            writer.writerow([f"{key}_{sub_key}", sub_value])
-                    else:
-                        writer.writerow([key, value])
-                st.download_button(label="Download CSV", data=csv_data.getvalue(), file_name="scraping_results.csv", mime="text/csv")
-            elif export_format == "HTML":
-                html_str = "<html><body>"
-                for key, value in st.session_state.web_scraping_results.items():
-                    html_str += f"<h2>{key}</h2>"
-                    if isinstance(value, str):
-                        html_str += f"<p>{value}</p>"
-                    elif isinstance(value, dict):
-                        html_str += "<ul>"
-                        for sub_key, sub_value in value.items():
-                            html_str += f"<li><strong>{sub_key}:</strong> {sub_value}</li>"
-                        html_str += "</ul>"
-                    elif isinstance(value, list):
-                        html_str += "<ul>"
-                        for item in value:
-                            html_str += f"<li>{item}</li>"
-                        html_str += "</ul>"
-                html_str += "</body></html>"
-                st.download_button(label="Download HTML", data=html_str, file_name="scraping_results.html", mime="text/html")
+        st.subheader("Ask a question about the scraped data")
+        query = st.text_input("Enter your query:")
+        if st.button("Get Answer"):
+            answer = answer_query_with_model(query, st.session_state.scraped_data, selected_model)
+            st.write("Answer:", answer)
+
+def answer_query_with_model(query: str, data: dict, selected_model: str) -> str:
+    # Convert the scraped data to a string format
+    data_str = json.dumps(data, indent=2)
+
+    # Initialize the language model
+    llm = Ollama(base_url=OLLAMA_BASE_URL, model=selected_model, callbacks=[StreamingStdOutCallbackHandler()])
+
+    # Create a prompt for the language model
+    prompt = f"""
+    You are an AI assistant. Here is the scraped data from a website:
+    {data_str}
+
+    Based on this data, answer the following question:
+    {query}
+    """
+
+    # Get the response from the language model
+    response = llm(prompt)
+    return response
 
 def main():
     st.set_page_config(page_title="Dev'sUI", layout="wide")
@@ -374,7 +367,7 @@ def main():
     elif st.session_state.mode == "General Chat":
         general_chat_mode(selected_model)
     elif st.session_state.mode == "Web Scraping":
-        web_scraping_mode()
+        web_scraping_mode(selected_model)
 
 def delete_history():
     if st.session_state.project_dir:
