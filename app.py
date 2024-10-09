@@ -17,6 +17,8 @@ from langchain.embeddings import HuggingFaceEmbeddings
 import tempfile
 from langchain.chains import RetrievalQA
 
+from langchain.chains import ConversationChain
+
 import re
 import requests
 from bs4 import BeautifulSoup
@@ -72,6 +74,9 @@ def load_document(uploaded_file):
     try:
         loader = PyPDFLoader(temp_file_path) if file_extension == '.pdf' else TextLoader(temp_file_path)
         return loader.load()
+    except Exception as e:
+        st.error(f"Error loading document: {str(e)}")
+        return []
     finally:
         os.unlink(temp_file_path)
 
@@ -167,7 +172,7 @@ def readme_generator_mode(selected_model: str):
             else:
                 st.success(update_message)
             save_project_state()
-            st.experimental_rerun()
+            
     
     if st.session_state.current_file:
         st.write(f"Editing: {st.session_state.current_file}")
@@ -240,23 +245,68 @@ def document_chat_mode(selected_model: str):
                 st.write("Answer:", qa_chain.run(doc_chat_input))
 
 def general_chat_mode(selected_model: str):
-    llm = Ollama(base_url=OLLAMA_BASE_URL, model=selected_model, callbacks=[StreamingStdOutCallbackHandler()])
     if "general_chat_messages" not in st.session_state:
         st.session_state.general_chat_messages = []
+    if "chat_memory" not in st.session_state:
+        st.session_state.chat_memory = ConversationBufferMemory()
+
+    llm = Ollama(base_url=OLLAMA_BASE_URL, model=selected_model, callbacks=[StreamingStdOutCallbackHandler()])
+    conversation = ConversationChain(llm=llm, memory=st.session_state.chat_memory)
+
     for message in st.session_state.general_chat_messages:
-        st.write(f"**{message['role']}:** {message['content']}")
-    user_input = st.text_input("Chat with the AI:", key="general_chat_input")
-    if st.button("Send", key="general_chat_send") and user_input:
-        st.session_state.general_chat_messages.append({"role": "Human", "content": user_input})
-        with st.spinner("AI is thinking..."):
-            response = llm(user_input)
-        st.session_state.general_chat_messages.append({"role": "AI", "content": response})
-        st.experimental_rerun()
+        st.chat_message(message["role"]).write(message["content"])
+
+    user_input = st.chat_input("Chat with the AI:", key="general_chat_input")
+
+    if user_input:
+        st.session_state.general_chat_messages.append({"role": "human", "content": user_input})
+        st.chat_message("human").write(user_input)
+
+        with st.chat_message("ai"):
+            with st.spinner("AI is thinking..."):
+                try:
+                    response = conversation.predict(input=user_input)
+                    st.write(response)
+                    st.session_state.general_chat_messages.append({"role": "ai", "content": response})
+                except Exception as e:
+                    st.error(f"An error occurred: {str(e)}")
+
+    
+    if st.button("Clear Chat History"):
+        st.session_state.general_chat_messages = []
+        st.session_state.chat_memory.clear()
+        
+
+def scrape_data(soup, data_to_scrape):
+    scraped_data = {}
+    if data_to_scrape["title"]:
+        scraped_data["title"] = soup.title.string if soup.title else "No title found"
+    if data_to_scrape["meta"]:
+        scraped_data["meta"] = {meta['name']: meta['content'] for meta in soup.find_all('meta', attrs={'name': True, 'content': True})}
+    if data_to_scrape["headers"]:
+        scraped_data["headers"] = {f"h{i}": [h.text for h in soup.find_all(f'h{i}')] for i in range(1, 7)}
+    if data_to_scrape["paragraphs"]:
+        scraped_data["paragraphs"] = [p.text for p in soup.find_all('p')]
+    if data_to_scrape["links"]:
+        scraped_data["links"] = [{'text': a.text, 'href': a['href']} for a in soup.find_all('a', href=True)]
+    if data_to_scrape["images"]:
+        scraped_data["images"] = [{'src': img['src'], 'alt': img.get('alt', '')} for img in soup.find_all('img', src=True)]
+    if data_to_scrape["tables"]:
+        scraped_data["tables"] = [pd.read_html(str(table))[0].to_dict() for table in soup.find_all('table')]
+    if data_to_scrape["lists"]:
+        scraped_data["lists"] = {
+            'ul': [{'items': [li.text for li in ul.find_all('li')]} for ul in soup.find_all('ul')],
+            'ol': [{'items': [li.text for li in ol.find_all('li')]} for ol in soup.find_all('ol')]
+        }
+    if data_to_scrape["scripts"]:
+        scraped_data["scripts"] = [script.string for script in soup.find_all('script') if script.string]
+    if data_to_scrape["styles"]:
+        scraped_data["styles"] = [style.string for style in soup.find_all('style') if style.string]
+    return scraped_data
 
 def web_scraping_mode(selected_model: str):
     st.write("### Web Scraping")
     url = st.text_input("Enter a URL to scrape:")
-
     st.write("Select the data you want to scrape:")
     columns = st.columns(10)
     data_to_scrape = {
@@ -277,40 +327,13 @@ def web_scraping_mode(selected_model: str):
             try:
                 response = requests.get(url)
                 soup = BeautifulSoup(response.content, 'html.parser')
-                scraped_data = {}
-
-                if data_to_scrape["title"]:
-                    scraped_data["title"] = soup.title.string if soup.title else "No title found"
-                if data_to_scrape["meta"]:
-                    scraped_data["meta"] = {meta['name']: meta['content'] for meta in soup.find_all('meta', attrs={'name': True, 'content': True})}
-                if data_to_scrape["headers"]:
-                    scraped_data["headers"] = {f"h{i}": [h.text for h in soup.find_all(f'h{i}')] for i in range(1, 7)}
-                if data_to_scrape["paragraphs"]:
-                    scraped_data["paragraphs"] = [p.text for p in soup.find_all('p')]
-                if data_to_scrape["links"]:
-                    scraped_data["links"] = [{'text': a.text, 'href': a['href']} for a in soup.find_all('a', href=True)]
-                if data_to_scrape["images"]:
-                    scraped_data["images"] = [{'src': img['src'], 'alt': img.get('alt', '')} for img in soup.find_all('img', src=True)]
-                if data_to_scrape["tables"]:
-                    scraped_data["tables"] = [pd.read_html(str(table))[0].to_dict() for table in soup.find_all('table')]
-                if data_to_scrape["lists"]:
-                    scraped_data["lists"] = {
-                        'ul': [{'items': [li.text for li in ul.find_all('li')]} for ul in soup.find_all('ul')],
-                        'ol': [{'items': [li.text for li in ol.find_all('li')]} for ol in soup.find_all('ol')]
-                    }
-                if data_to_scrape["scripts"]:
-                    scraped_data["scripts"] = [script.string for script in soup.find_all('script') if script.string]
-                if data_to_scrape["styles"]:
-                    scraped_data["styles"] = [style.string for style in soup.find_all('style') if style.string]
-
-                st.session_state.scraped_data = scraped_data
+                st.session_state.scraped_data = scrape_data(soup, data_to_scrape)
                 st.success("Scraping completed successfully!")
             except Exception as e:
                 st.error(f"Error scraping website: {str(e)}")
 
     if "scraped_data" in st.session_state:
         st.write("#### Scraping Results")
-
         for key, value in st.session_state.scraped_data.items():
             st.subheader(key.capitalize())
             if isinstance(value, str):
@@ -336,13 +359,12 @@ def web_scraping_mode(selected_model: str):
             st.write("Answer:", answer)
 
 def answer_query_with_model(query: str, data: dict, selected_model: str) -> str:
-    # Convert the scraped data to a string format
+    
     data_str = json.dumps(data, indent=2)
 
-    # Initialize the language model
+    
     llm = Ollama(base_url=OLLAMA_BASE_URL, model=selected_model, callbacks=[StreamingStdOutCallbackHandler()])
 
-    # Create a prompt for the language model
     prompt = f"""
     You are an AI assistant. Here is the scraped data from a website:
     {data_str}
@@ -351,7 +373,6 @@ def answer_query_with_model(query: str, data: dict, selected_model: str) -> str:
     {query}
     """
 
-    # Get the response from the language model
     response = llm(prompt)
     return response
 
