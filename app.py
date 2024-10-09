@@ -1,4 +1,7 @@
 import streamlit as st
+from streamlit_option_menu import option_menu
+import extra_streamlit_components as stx
+
 import subprocess
 import os
 import json
@@ -66,6 +69,7 @@ def create_or_update_file(project_dir: str, file_content: str, file_path: str) -
     except Exception as e:
         return f"Error creating/updating file {sanitized_path}: {str(e)}"
 
+
 def load_document(uploaded_file):
     file_extension = os.path.splitext(uploaded_file.name)[1].lower()
     with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
@@ -79,6 +83,7 @@ def load_document(uploaded_file):
         return []
     finally:
         os.unlink(temp_file_path)
+
 
 def process_document(documents):
     texts = CharacterTextSplitter(chunk_size=1000, chunk_overlap=200).split_documents(documents)
@@ -127,17 +132,61 @@ def load_project_state():
                 st.session_state.messages = state["messages"]
                 st.session_state.git_initialized = state.get("git_initialized", False)
 
+def set_page_config():
+    st.set_page_config(page_title="Dev'sUI", layout="wide", initial_sidebar_state="expanded")
+    
+    st.markdown("""
+    <style>
+    .stApp {
+        background-color: #000000;
+        color: #F7F7F7; 
+    }
+    .stSidebar {
+        background-color: #000000; 
+        color: #F7F7F7;
+    }
+    .stButton>button {
+        background-color: #93DEFF; 
+        color: #000000; 
+        border-radius: 5px;
+    }
+    .stTextInput>div>div>input {
+        border-radius: 5px;
+        background-color: #F7F7F7; 
+        color: #000000; 
+    }
+    .stHeader {
+        background-color: #000000; 
+        padding: 1rem;
+        border-radius: 5px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        color: #F7F7F7;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 def sidebar_content():
-    st.sidebar.title("Dev'sUI")
-    st.session_state.mode = st.sidebar.radio("Choose a mode", ["README Generator", "Document Chat", "General Chat", "Web Scraping"])
-    available_models = get_available_models()
-    if available_models:
-        st.session_state.selected_model = st.sidebar.selectbox("Choose a model", available_models)
-    else:
-        st.session_state.selected_model = None
-    if st.session_state.project_dir:
-        if st.sidebar.button("Export Project"):
-            export_project()
+    with st.sidebar:
+        st.title("Dev'sUI")
+        selected_mode = option_menu(
+            menu_title=None,
+            options=["README Generator", "Document Chat", "General Chat", "Web Scraping"],
+            icons=['file-text', 'chat-dots', 'chat', 'globe'],
+            default_index=0,
+            
+        )
+        st.session_state.mode = selected_mode
+
+        available_models = get_available_models()
+        if available_models:
+            st.session_state.selected_model = st.selectbox("Choose a model", available_models)
+        else:
+            st.session_state.selected_model = None
+
+        if st.session_state.project_dir:
+            if st.button("Export Project", key="export_project"):
+                export_project()
+
     return st.session_state.selected_model
 
 def export_project():
@@ -228,21 +277,127 @@ def generate_readme(project_dir: str, selected_model: str) -> str:
     return response
 
 def document_chat_mode(selected_model: str):
-    uploaded_file = st.file_uploader("Upload a document (PDF, TXT, or MD)", type=["pdf", "txt", "md"])
-    if uploaded_file is not None:
-        with st.spinner("Processing document..."):
-            documents = load_document(uploaded_file)
-            vectorstore = process_document(documents)
-            if vectorstore:
-                st.session_state.vectorstore = vectorstore
-                st.success("Document processed successfully!")
-    if st.session_state.vectorstore:
-        llm = Ollama(base_url=OLLAMA_BASE_URL, model=selected_model, callbacks=[StreamingStdOutCallbackHandler()])
-        doc_chat_input = st.text_input("Ask a question about the document:")
-        if doc_chat_input:
-            with st.spinner("Searching for answer..."):
-                qa_chain = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=st.session_state.vectorstore.as_retriever())
-                st.write("Answer:", qa_chain.run(doc_chat_input))
+    if "documents" not in st.session_state:
+        st.session_state.documents = {}
+    if "current_document" not in st.session_state:
+        st.session_state.current_document = None
+
+    st.markdown("""
+    <style>
+    .stApp {
+        background-color: #000000;
+        color: #F7F7F7;
+    }
+    .stButton>button {
+        background-color: #93DEFF;
+        color: #000000;
+        font-weight: bold;
+        border-radius: 5px;
+    }
+    .stTextInput>div>div>input {
+        background-color: #000000;
+        color: #F7F7F7;
+        border-color: #93DEFF;
+    }
+    .stTabs>div>div>div {
+        background-color: #000000;
+        color: #F7F7F7;
+    }
+    .stTabs>div>div>div[data-baseweb="tab-list"] {
+        gap: 10px;
+    }
+    .stTabs>div>div>div[data-baseweb="tab"] {
+        background-color: #000000;
+        color: #F7F7F7;
+        border-radius: 5px 5px 0 0;
+    }
+    .stTabs>div>div>div[data-baseweb="tab"][aria-selected="true"] {
+        background-color: #93DEFF;
+        color: #000000;
+    }
+    .stMarkdown {
+        color: #F7F7F7;
+    }
+    .stExpander {
+        background-color: #000000;
+        border-radius: 5px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.header("Document Chat")
+    
+    tab1, tab2 = st.tabs(["📁 Manage Documents", "💬 Chat"])
+
+    with tab1:
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.subheader("Upload Document")
+            uploaded_file = st.file_uploader("Upload a document (PDF, TXT, or MD)", type=["pdf", "txt", "md"])
+            if uploaded_file is not None:
+                if uploaded_file.name not in st.session_state.documents:
+                    if st.button("Process Document"):
+                        with st.spinner("Processing document..."):
+                            documents = load_document(uploaded_file)
+                            vectorstore = process_document(documents)
+                            if vectorstore:
+                                st.session_state.documents[uploaded_file.name] = {
+                                    "vectorstore": vectorstore,
+                                    "content": documents
+                                }
+                                st.success(f"Document '{uploaded_file.name}' processed successfully!")
+                else:
+                    st.info(f"Document '{uploaded_file.name}' already processed.")
+
+        with col2:
+            st.subheader("Manage Documents")
+            for doc_name in st.session_state.documents.keys():
+                with st.expander(doc_name):
+                    col1, col2 = st.columns(2)
+                    if col1.button("Select", key=f"select_{doc_name}"):
+                        st.session_state.current_document = doc_name
+                    if col2.button("Delete", key=f"delete_{doc_name}"):
+                        del st.session_state.documents[doc_name]
+                        if st.session_state.current_document == doc_name:
+                            st.session_state.current_document = None
+                        st.experimental_rerun()
+
+    with tab2:
+        if st.session_state.current_document:
+            st.info(f"Current document: {st.session_state.current_document}")
+            
+            llm = Ollama(base_url=OLLAMA_BASE_URL, model=selected_model, callbacks=[StreamingStdOutCallbackHandler()])
+            
+            doc_chat_input = st.text_input("Ask a question about the document:")
+            if doc_chat_input:
+                with st.spinner("Searching for answer..."):
+                    vectorstore = st.session_state.documents[st.session_state.current_document]["vectorstore"]
+                    qa_chain = RetrievalQA.from_chain_type(
+                        llm=llm, 
+                        chain_type="stuff", 
+                        retriever=vectorstore.as_retriever(search_kwargs={"k": 3})
+                    )
+                    answer = qa_chain.run(doc_chat_input)
+                    
+                    st.markdown("### Answer:")
+                    st.markdown(f'<div style="background-color: #000000; color: #F7F7F7; padding: 10px; border-radius: 5px; border: 1px solid #93DEFF;">{answer}</div>', unsafe_allow_html=True)
+                    
+                    with st.expander("View Relevant Passages"):
+                        relevant_docs = vectorstore.similarity_search(doc_chat_input, k=3)
+                        for i, doc in enumerate(relevant_docs, 1):
+                            st.markdown(f"**Passage {i}:**")
+                            st.markdown(f'<div style="background-color: #000000; color: #F7F7F7; padding: 10px; border-radius: 5px; margin-bottom: 10px; border: 1px solid #93DEFF;">{doc.page_content}</div>', unsafe_allow_html=True)
+            
+            if st.button("View Document Content"):
+                with st.expander("Document Content", expanded=True):
+                    content = st.session_state.documents[st.session_state.current_document]["content"]
+                    for i, page in enumerate(content, 1):
+                        st.markdown(f"**Page {i}:**")
+                        st.markdown(f'<div style="background-color: #000000; color: #F7F7F7; padding: 10px; border-radius: 5px; margin-bottom: 10px; border: 1px solid #93DEFF;">{page.page_content}</div>', unsafe_allow_html=True)
+        else:
+            st.warning("Please select a document to start chatting.")
+
 
 def general_chat_mode(selected_model: str):
     if "general_chat_messages" not in st.session_state:
@@ -377,7 +532,7 @@ def answer_query_with_model(query: str, data: dict, selected_model: str) -> str:
     return response
 
 def main():
-    st.set_page_config(page_title="Dev'sUI", layout="wide")
+    set_page_config()
     init_session_state()
     selected_model = sidebar_content()
     
