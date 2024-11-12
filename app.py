@@ -168,12 +168,10 @@ def set_page_config():
 def sidebar_content():
     with st.sidebar:
         st.title("Dev'sUI")
-        selected_mode = option_menu(
-            menu_title=None,
-            options=["README Generator", "Document Chat", "General Chat", "Web Scraping"],
-            icons=['file-text', 'chat-dots', 'chat', 'globe'],
-            default_index=0,
-            
+        selected_mode = st.radio(
+            "Choose a mode",
+            ["README Generator", "Document Chat", "General Chat", "Web Scraping"],
+            index=0,
         )
         st.session_state.mode = selected_mode
 
