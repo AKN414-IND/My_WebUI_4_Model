@@ -88,11 +88,12 @@ def load_document(uploaded_file):
 def process_document(documents):
     texts = CharacterTextSplitter(chunk_size=1000, chunk_overlap=200).split_documents(documents)
     try:
-        return FAISS.from_documents(texts, HuggingFaceEmbeddings())
+        vectorstore = FAISS.from_documents(texts, HuggingFaceEmbeddings())
+        return vectorstore, texts
     except Exception as e:
         st.error(f"Error processing document: {str(e)}")
-        return None
-
+        return None, None
+    
 def init_session_state():
     default_values = {
         'project_info': {},
@@ -106,9 +107,9 @@ def init_session_state():
         'current_file': None,
         'web_scraping_results': None,
     }
-    for key, default_value in default_values.items():
+    for key, value in default_values.items():
         if key not in st.session_state:
-            st.session_state[key] = default_value
+            st.session_state[key] = value
 
 def save_project_state():
     if st.session_state.project_dir:
@@ -338,11 +339,12 @@ def document_chat_mode(selected_model: str):
                     if st.button("Process Document"):
                         with st.spinner("Processing document..."):
                             documents = load_document(uploaded_file)
-                            vectorstore = process_document(documents)
+                            vectorstore, texts = process_document(documents)
                             if vectorstore:
                                 st.session_state.documents[uploaded_file.name] = {
                                     "vectorstore": vectorstore,
-                                    "content": documents
+                                    "content": documents,
+                                    "texts": texts
                                 }
                                 st.success(f"Document '{uploaded_file.name}' processed successfully!")
                 else:
@@ -371,10 +373,11 @@ def document_chat_mode(selected_model: str):
             if doc_chat_input:
                 with st.spinner("Searching for answer..."):
                     vectorstore = st.session_state.documents[st.session_state.current_document]["vectorstore"]
+                    retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
                     qa_chain = RetrievalQA.from_chain_type(
                         llm=llm, 
                         chain_type="stuff", 
-                        retriever=vectorstore.as_retriever(search_kwargs={"k": 3})
+                        retriever=retriever
                     )
                     answer = qa_chain.run(doc_chat_input)
                     
@@ -382,7 +385,7 @@ def document_chat_mode(selected_model: str):
                     st.markdown(f'<div style="background-color: #000000; color: #F7F7F7; padding: 10px; border-radius: 5px; border: 1px solid #93DEFF;">{answer}</div>', unsafe_allow_html=True)
                     
                     with st.expander("View Relevant Passages"):
-                        relevant_docs = vectorstore.similarity_search(doc_chat_input, k=3)
+                        relevant_docs = retriever.get_relevant_documents(doc_chat_input)
                         for i, doc in enumerate(relevant_docs, 1):
                             st.markdown(f"**Passage {i}:**")
                             st.markdown(f'<div style="background-color: #000000; color: #F7F7F7; padding: 10px; border-radius: 5px; margin-bottom: 10px; border: 1px solid #93DEFF;">{doc.page_content}</div>', unsafe_allow_html=True)
@@ -392,10 +395,9 @@ def document_chat_mode(selected_model: str):
                     content = st.session_state.documents[st.session_state.current_document]["content"]
                     for i, page in enumerate(content, 1):
                         st.markdown(f"**Page {i}:**")
-                        st.markdown(f'<div style="background-color: #000000; color: #F7F7F7; padding: 10px; border-radius: 5px; margin-bottom: 10px; border: 1px solid #93DEFF;">{page.page_content}</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div style="background-color: #000000; color: #F7F7F7; padding: 10px; border-radius: 5px; margin-bottom: 10px; border: 1px solid #93DEFF;">{page.page_content}</div>')
         else:
             st.warning("Please select a document to start chatting.")
-
 
 def general_chat_mode(selected_model: str):
     if "general_chat_messages" not in st.session_state:
